@@ -2,20 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Shopify Online Store 2.0 のテーマに、商品画像上でリアルタイム名入れプレビューができる代替テンプレートと、メイン商品ページ用ボタンスニペットを追加する。
+**Goal:** Shopify Admin に埋め込まれた React Router v7 アプリを構築し、各商品の `custom_simulator.config` メタフィールドを管理（登録・編集）できる画面を提供する。ストアフロント側のLiqual実装は別リポジトリ（`shop-moltensports-jp`）で行うため、このアプリはAdmin UI のみに専念する。
 
-**Architecture:** `?view=personalize` の代替テンプレート（`product.personalize.json`）が `main-product-personalize` セクションを呼び出す。セクション内のVanilla JSが sessionStorage から配置設定を読み込み、商品画像上にテキストオーバーレイを生成する。カート追加時は Shopify Ajax API でメイン商品と名入れ料金商品を同時投入し、Line Item Properties に名入れ内容を記録する。
+**Architecture:** React Router v7（Shopify App テンプレート）でアプリを生成する。Shopify Admin GraphQL API を通じて商品の metafield (`custom_simulator.config`) を読み書きする。
 
-**Tech Stack:** Shopify Online Store 2.0, Liquid, Vanilla JS (ES6), CSS (Absolute Positioning), Shopify Ajax API (`/cart/add.js`)
+**Tech Stack:** Shopify CLI 3.x, React Router v7（Shopify App テンプレート）, Shopify Admin GraphQL API, Polaris（UIコンポーネント）
 
 ## Global Constraints
 
-- Vanilla JS のみ使用。外部ライブラリ・フレームワーク不可。
-- テキスト配置座標はすべてピクセルではなく % で管理する。
 - メタフィールド namespace/key: `custom_simulator.config`（JSON型）
-- 名入れ料金商品のスラッグ: `name-printing-fee`（別途Shopify管理画面で作成済みが前提）
-- カート追加は `/cart/add.js` の `items` 配列で2アイテム同時投入する。
-- テスト環境: `shopify theme dev` を使用したローカルプレビュー（Shopify開発ストアが必要）
+- React Router v7 の規約に従うこと（`shopify app init` が生成するテンプレートのまま使う）
+- GraphQL の mutation は Shopify の `metafieldsSet` を使う
+- Node.js: 18.x 以上
+- テーマ側の Liquid 実装はこのリポジトリの対象外。設計はこのドキュメントの末尾に参照用として記載する。
 
 ---
 
@@ -23,552 +22,557 @@
 
 | ファイル | 役割 |
 |---|---|
-| `templates/product.personalize.json` | 代替テンプレート定義。`main-product-personalize` セクションを参照する |
-| `sections/main-product-personalize.liquid` | シミュレーター画面の全体（HTML構造・CSS・JS）を実装する |
-| `snippets/naire-button.liquid` | メイン商品ページに埋め込む「名入れする」ボタン。sessionStorage保存と遷移を担当する |
+| `shopify.app.toml` | アプリ設定（CLI生成） |
+| `app/routes/app._index.tsx` | 商品一覧。メタフィールド設定済み/未設定を区別して表示する |
+| `app/routes/app.products.$id.tsx` | 商品ごとの `custom_simulator.config` 編集画面 |
+| `app/graphql/products.ts` | 商品一覧取得・メタフィールド読み書きのGraphQLクエリ定数 |
 
 ---
 
-## Task 1: 代替テンプレートの定義
+## Task 1: Shopify App のスキャフォールド
 
 **Files:**
-- Create: `templates/product.personalize.json`
+- Generate: `shopify.app.toml`, `app/`, `package.json`（CLI生成）
 
 **Interfaces:**
-- Produces: `?view=personalize` でアクセスした際に `main-product-personalize` セクションがレンダリングされる
+- Produces: `shopify app dev` が起動できる状態
 
-- [ ] **Step 1: ファイルを作成する**
+> **注意:** `shopify app init` は対話型コマンドのため、ターミナルで手動実行する。
 
-```json
-{
-  "sections": {
-    "main": {
-      "type": "main-product-personalize",
-      "settings": {}
-    }
-  },
-  "order": ["main"]
-}
-```
-
-- [ ] **Step 2: ローカルで動作確認する**
+- [ ] **Step 1: Shopify CLI のバージョンを確認する**
 
 ```bash
-shopify theme dev --store your-store.myshopify.com
+shopify version
 ```
 
-ブラウザで `/products/name-printing-fee?view=personalize` を開き、Shopify が 404 でなく（セクションファイルがまだなくても）テンプレートを認識することを確認する。
+Expected output: `3.x.x` 系（3.60以上推奨）
 
-- [ ] **Step 3: コミットする**
+- [ ] **Step 2: リポジトリルートでアプリを初期化する**
 
 ```bash
-git add templates/product.personalize.json
-git commit -m "feat: add product.personalize alternate template"
+cd /Users/yuyawada/Helpful/naire-dev
+shopify app init
 ```
 
----
+プロンプトで以下を選択する：
+- Template: **Start by adding your first extension** → No, start with app only
+- Framework: **React Router** 
+- Package manager: **npm**
 
-## Task 2: シミュレーター画面のHTML/CSS骨格
+> `docs/` フォルダは上書きされない。
 
-**Files:**
-- Create: `sections/main-product-personalize.liquid`
-
-**Interfaces:**
-- Consumes: Task 1 の `product.personalize.json` からレンダリングを受ける
-- Produces: 商品画像・入力フォーム・カートボタンが正しい2カラムレイアウトで表示される。JSは未実装の状態。
-
-- [ ] **Step 1: HTML/CSS骨格を作成する**
-
-`sections/main-product-personalize.liquid` を以下の内容で作成する:
-
-```liquid
-<style>
-  .naire-simulator {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 40px;
-    max-width: 1200px;
-    margin: 40px auto;
-    padding: 0 20px;
-  }
-
-  .naire-simulator__preview {
-    flex: 1 1 400px;
-  }
-
-  .naire-simulator__image-wrapper {
-    position: relative;
-    display: inline-block;
-    width: 100%;
-  }
-
-  .naire-simulator__image-wrapper img {
-    width: 100%;
-    height: auto;
-    display: block;
-  }
-
-  .naire-simulator__text-overlay {
-    position: absolute;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6);
-    font-size: clamp(14px, 3vw, 28px);
-    line-height: 1;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-
-  .naire-simulator__form {
-    flex: 1 1 300px;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-  }
-
-  .naire-simulator__form h1 {
-    font-size: 1.5rem;
-    margin: 0;
-  }
-
-  .naire-simulator__input-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .naire-simulator__input-group label {
-    font-weight: bold;
-    font-size: 0.9rem;
-  }
-
-  .naire-simulator__input-group input[type="text"] {
-    width: 100%;
-    padding: 10px 12px;
-    font-size: 1rem;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    box-sizing: border-box;
-  }
-
-  .naire-char-count {
-    font-size: 0.8rem;
-    color: #888;
-    text-align: right;
-  }
-
-  .naire-simulator__font-select {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .naire-simulator__font-select > span {
-    font-weight: bold;
-    font-size: 0.9rem;
-  }
-
-  .naire-font-options {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .naire-font-options button {
-    padding: 8px 16px;
-    border: 2px solid #ccc;
-    background: #fff;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 0.9rem;
-    transition: border-color 0.2s;
-  }
-
-  .naire-font-options button.is-active {
-    border-color: #000;
-    background: #f5f5f5;
-  }
-
-  .naire-add-to-cart-btn {
-    padding: 14px 24px;
-    background: #000;
-    color: #fff;
-    font-size: 1rem;
-    border: none;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: opacity 0.2s;
-  }
-
-  .naire-add-to-cart-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .naire-loading {
-    font-size: 0.9rem;
-    color: #555;
-  }
-
-  .naire-error {
-    font-size: 0.9rem;
-    color: #c00;
-    padding: 10px;
-    border: 1px solid #c00;
-    border-radius: 4px;
-  }
-
-  .naire-config-error {
-    text-align: center;
-    padding: 40px 20px;
-    color: #c00;
-  }
-</style>
-
-<div class="naire-simulator" id="js-naire-simulator">
-  <div class="naire-simulator__preview">
-    <div class="naire-simulator__image-wrapper" id="js-image-wrapper">
-      <img
-        src="{{ product.featured_image | image_url: width: 800 }}"
-        alt="{{ product.title | escape }}"
-        id="js-product-image"
-        width="800"
-        height="800"
-      >
-      <div class="naire-simulator__text-overlay" id="js-text-overlay"></div>
-    </div>
-  </div>
-
-  <div class="naire-simulator__form">
-    <h1>{{ product.title | escape }}</h1>
-
-    <div id="js-config-error" class="naire-config-error" style="display: none;">
-      設定が正しく読み込まれませんでした。<br>
-      <a href="{{ product.url }}">商品ページ</a>からやり直してください。
-    </div>
-
-    <div id="js-form-body">
-      <div class="naire-simulator__input-group">
-        <label for="naire-text-input">名入れテキスト</label>
-        <input
-          type="text"
-          id="naire-text-input"
-          placeholder="例：TANAKA"
-          autocomplete="off"
-        >
-        <span class="naire-char-count" id="js-char-count">0/15</span>
-      </div>
-
-      <div class="naire-simulator__font-select">
-        <span>フォント選択</span>
-        <div class="naire-font-options" id="js-font-options"></div>
-      </div>
-
-      <button type="button" class="naire-add-to-cart-btn" id="js-add-to-cart">
-        確定してカートに入れる
-      </button>
-
-      <div class="naire-loading" id="js-loading" style="display: none;">追加中...</div>
-      <div class="naire-error" id="js-error" style="display: none;"></div>
-    </div>
-  </div>
-</div>
-
-<script>
-  // Task 3 で JS を追加する
-</script>
-
-{% schema %}
-{
-  "name": "名入れシミュレーター",
-  "settings": []
-}
-{% endschema %}
-```
-
-- [ ] **Step 2: ブラウザで表示を確認する**
-
-`shopify theme dev` が起動中の状態で `/products/name-printing-fee?view=personalize` を開き、以下を確認する：
-- 商品画像と入力フォームが2カラムで並ぶ
-- スマホ幅（375px）に縮めた際に縦1カラムに折り返す
-- 入力欄・フォント選択エリア・カートボタンが存在する
-
-- [ ] **Step 3: コミットする**
+- [ ] **Step 3: 依存パッケージをインストールする**
 
 ```bash
-git add sections/main-product-personalize.liquid
-git commit -m "feat: add simulator section HTML/CSS skeleton"
+npm install
+```
+
+- [ ] **Step 4: `.gitignore` に `node_modules` と `.env` が含まれることを確認する**
+
+```bash
+grep -E "node_modules|\.env" .gitignore
+```
+
+両方が含まれていれば OK。
+
+- [ ] **Step 5: 開発サーバーを起動して初期画面を確認する**
+
+```bash
+shopify app dev
+```
+
+Shopify Admin でアプリが開き、CLIが生成したデフォルト画面が表示されることを確認する。確認後 Ctrl+C で停止する。
+
+- [ ] **Step 6: コミットする**
+
+```bash
+git add -A
+git commit -m "feat: scaffold Shopify App with React Router template"
 ```
 
 ---
 
-## Task 3: シミュレーターのJS実装（初期化・プレビュー・カート追加）
+## Task 2: GraphQL クエリ定数の定義
 
 **Files:**
-- Modify: `sections/main-product-personalize.liquid`（`<script>` タグ内を置き換える）
+- Create: `app/graphql/products.ts`
 
 **Interfaces:**
-- Consumes:
-  - `sessionStorage.getItem('naire_config')` → JSON文字列（`box_top`, `box_left`, `box_width`, `box_height`, `max_characters`, `available_fonts`, `default_font_color`）
-  - URLクエリ `?parent_id=XXXXX` → メイン商品のVariant ID（数値）
-  - Liquidから: `{{ product.variants.first.id }}` → 名入れ料金商品のVariant ID
 - Produces:
-  - 画像上のテキストオーバーレイがリアルタイムに更新される
-  - 「確定してカートに入れる」押下で `/cart/add.js` が呼ばれ、カートページへ遷移する
+  - `PRODUCTS_QUERY` — 商品一覧 + `custom_simulator.config` メタフィールドを取得する
+  - `METAFIELDS_SET_MUTATION` — メタフィールドを登録・更新する
 
-- [ ] **Step 1: `<script>` タグ内を以下で置き換える**
+- [ ] **Step 1: `app/graphql/products.ts` を作成する**
 
-`sections/main-product-personalize.liquid` の `<script>` タグ内（`// Task 3 で JS を追加する` の行）を以下で置き換える:
-
-```js
-(function () {
-  var FEE_VARIANT_ID = {{ product.variants.first.id }};
-
-  // --- 1. URLと sessionStorage からデータを取得 ---
-  var params = new URLSearchParams(window.location.search);
-  var parentVariantId = params.get('parent_id');
-
-  var config = null;
-  try {
-    var raw = sessionStorage.getItem('naire_config');
-    if (raw) config = JSON.parse(raw);
-  } catch (e) {}
-
-  // --- 2. 設定が取得できない場合はエラー表示して終了 ---
-  if (!config || !parentVariantId) {
-    document.getElementById('js-config-error').style.display = 'block';
-    document.getElementById('js-form-body').style.display = 'none';
-    return;
-  }
-
-  // --- 3. テキスト入力フィールドの文字数上限をメタフィールド値に設定 ---
-  var textInput = document.getElementById('naire-text-input');
-  var charCountEl = document.getElementById('js-char-count');
-  var maxChars = config.max_characters || 15;
-  textInput.maxLength = maxChars;
-  charCountEl.textContent = '0/' + maxChars;
-
-  // --- 4. バウンディングボックス（テキストオーバーレイ）を配置 ---
-  var overlay = document.getElementById('js-text-overlay');
-  overlay.style.top = config.box_top + '%';
-  overlay.style.left = config.box_left + '%';
-  overlay.style.width = config.box_width + '%';
-  overlay.style.height = config.box_height + '%';
-  overlay.style.color = config.default_font_color || '#FFFFFF';
-
-  // --- 5. フォント選択ボタンを動的生成 ---
-  var fontContainer = document.getElementById('js-font-options');
-  var fonts = Array.isArray(config.available_fonts) && config.available_fonts.length > 0
-    ? config.available_fonts
-    : ['明朝体'];
-  var selectedFont = fonts[0];
-
-  fonts.forEach(function (font) {
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = font;
-    btn.style.fontFamily = font;
-    if (font === selectedFont) btn.classList.add('is-active');
-
-    btn.addEventListener('click', function () {
-      selectedFont = font;
-      fontContainer.querySelectorAll('button').forEach(function (b) {
-        b.classList.remove('is-active');
-      });
-      btn.classList.add('is-active');
-      updatePreview();
-    });
-
-    fontContainer.appendChild(btn);
-  });
-
-  // --- 6. リアルタイムプレビュー更新 ---
-  function updatePreview() {
-    overlay.textContent = textInput.value;
-    overlay.style.fontFamily = selectedFont;
-    charCountEl.textContent = textInput.value.length + '/' + maxChars;
-  }
-
-  textInput.addEventListener('input', updatePreview);
-
-  // 初期フォントをオーバーレイに適用
-  overlay.style.fontFamily = selectedFont;
-
-  // --- 7. カート追加 ---
-  var addToCartBtn = document.getElementById('js-add-to-cart');
-  var loadingEl = document.getElementById('js-loading');
-  var errorEl = document.getElementById('js-error');
-
-  addToCartBtn.addEventListener('click', function () {
-    var text = textInput.value.trim();
-    if (!text) {
-      errorEl.textContent = '名入れテキストを入力してください。';
-      errorEl.style.display = 'block';
-      return;
-    }
-
-    addToCartBtn.disabled = true;
-    loadingEl.style.display = 'block';
-    errorEl.style.display = 'none';
-
-    fetch('/cart/add.js', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        items: [
-          {
-            id: Number(parentVariantId),
-            quantity: 1,
-            properties: {
-              '名入れテキスト': text,
-              'フォント': selectedFont
-            }
-          },
-          {
-            id: FEE_VARIANT_ID,
-            quantity: 1
-          }
-        ]
-      })
-    })
-    .then(function (res) {
-      if (!res.ok) {
-        return res.json().then(function (data) {
-          throw new Error(data.description || 'カートへの追加に失敗しました。');
-        });
+```ts
+export const PRODUCTS_QUERY = `#graphql
+  query GetProducts($first: Int!, $after: String) {
+    products(first: $first, after: $after) {
+      pageInfo {
+        hasNextPage
+        endCursor
       }
-      return res.json();
-    })
-    .then(function () {
-      sessionStorage.removeItem('naire_config');
-      window.location.href = '/cart';
-    })
-    .catch(function (err) {
-      loadingEl.style.display = 'none';
-      addToCartBtn.disabled = false;
-      errorEl.textContent = err.message;
-      errorEl.style.display = 'block';
-    });
-  });
-})();
+      edges {
+        node {
+          id
+          title
+          featuredImage {
+            url
+          }
+          metafield(namespace: "custom_simulator", key: "config") {
+            id
+            value
+          }
+        }
+      }
+    }
+  }
+` as const;
+
+export const METAFIELDS_SET_MUTATION = `#graphql
+  mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+    metafieldsSet(metafields: $metafields) {
+      metafields {
+        id
+        key
+        value
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+` as const;
 ```
 
-- [ ] **Step 2: ブラウザでJS動作を確認する**
+- [ ] **Step 2: TypeScript のコンパイルが通ることを確認する**
 
-`/products/name-printing-fee?view=personalize&parent_id=DUMMY` を開いた状態でブラウザの開発者コンソールから以下を実行し、sessionStorageにモックデータを入れて動作確認する:
+```bash
+npx tsc --noEmit
+```
 
-```js
-sessionStorage.setItem('naire_config', JSON.stringify({
+Expected: エラーなし
+
+- [ ] **Step 3: コミットする**
+
+```bash
+git add app/graphql/products.ts
+git commit -m "feat: add GraphQL query constants for products and metafields"
+```
+
+---
+
+## Task 3: 商品一覧画面（`app._index.tsx`）
+
+**Files:**
+- Modify: `app/routes/app._index.tsx`
+
+**Interfaces:**
+- Consumes: `PRODUCTS_QUERY`（Task 2）、`shopify.server.ts`（CLIが生成）の `authenticate.admin`
+- Produces: 商品一覧を表示し、各商品の「設定済み/未設定」バッジと編集リンクを表示する
+
+- [ ] **Step 1: `app/routes/app._index.tsx` を以下に書き換える**
+
+```tsx
+import { json } from "@remix-run/node";
+import { useLoaderData, Link } from "@remix-run/react";
+import {
+  Page,
+  Layout,
+  Card,
+  ResourceList,
+  ResourceItem,
+  Text,
+  Badge,
+  Thumbnail,
+  EmptyState,
+} from "@shopify/polaris";
+import { authenticate } from "../shopify.server";
+import { PRODUCTS_QUERY } from "../graphql/products";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+
+type Product = {
+  id: string;
+  title: string;
+  featuredImage: { url: string } | null;
+  metafield: { id: string; value: string } | null;
+};
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  const response = await admin.graphql(PRODUCTS_QUERY, {
+    variables: { first: 50 },
+  });
+  const data = await response.json();
+  const products: Product[] = data.data.products.edges.map(
+    (e: { node: Product }) => e.node
+  );
+  return json({ products });
+}
+
+export default function Index() {
+  const { products } = useLoaderData<typeof loader>();
+
+  return (
+    <Page title="名入れシミュレーター - 商品一覧">
+      <Layout>
+        <Layout.Section>
+          <Card>
+            {products.length === 0 ? (
+              <EmptyState
+                heading="商品がありません"
+                image=""
+              >
+                <p>Shopify管理画面に商品を追加してください。</p>
+              </EmptyState>
+            ) : (
+              <ResourceList
+                resourceName={{ singular: "商品", plural: "商品" }}
+                items={products}
+                renderItem={(product) => {
+                  const numericId = product.id.replace(
+                    "gid://shopify/Product/",
+                    ""
+                  );
+                  return (
+                    <ResourceItem
+                      id={product.id}
+                      url={`/app/products/${numericId}`}
+                      media={
+                        product.featuredImage ? (
+                          <Thumbnail
+                            source={product.featuredImage.url}
+                            alt={product.title}
+                            size="small"
+                          />
+                        ) : undefined
+                      }
+                    >
+                      <Text as="h3" variant="bodyMd" fontWeight="bold">
+                        {product.title}
+                      </Text>
+                      <div style={{ marginTop: "4px" }}>
+                        {product.metafield ? (
+                          <Badge tone="success">設定済み</Badge>
+                        ) : (
+                          <Badge tone="attention">未設定</Badge>
+                        )}
+                      </div>
+                    </ResourceItem>
+                  );
+                }}
+              />
+            )}
+          </Card>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
+}
+```
+
+- [ ] **Step 2: TypeScript のコンパイルを確認する**
+
+```bash
+npx tsc --noEmit
+```
+
+Expected: エラーなし
+
+- [ ] **Step 3: `shopify app dev` で画面を確認する**
+
+商品一覧が表示され、メタフィールドが設定済みの商品に「設定済み」バッジ、未設定の商品に「未設定」バッジが表示されることを確認する。
+
+- [ ] **Step 4: コミットする**
+
+```bash
+git add app/routes/app._index.tsx
+git commit -m "feat: add product list page with metafield status badges"
+```
+
+---
+
+## Task 4: 商品メタフィールド編集画面（`app.products.$id.tsx`）
+
+**Files:**
+- Create: `app/routes/app.products.$id.tsx`
+
+**Interfaces:**
+- Consumes: `PRODUCTS_QUERY`, `METAFIELDS_SET_MUTATION`（Task 2）、URLパラメータ `$id`（商品の数値ID）
+- Produces:
+  - 現在の `custom_simulator.config` の各フィールドをフォームで編集できる
+  - 保存すると `metafieldsSet` mutation でメタフィールドを更新し、一覧ページへリダイレクトする
+
+- [ ] **Step 1: `app/routes/app.products.$id.tsx` を作成する**
+
+```tsx
+import { json, redirect } from "@remix-run/node";
+import { useLoaderData, useActionData, Form } from "@remix-run/react";
+import {
+  Page,
+  Layout,
+  Card,
+  FormLayout,
+  TextField,
+  Button,
+  Banner,
+  Text,
+} from "@shopify/polaris";
+import { authenticate } from "../shopify.server";
+import { PRODUCTS_QUERY, METAFIELDS_SET_MUTATION } from "../graphql/products";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
+
+type SimulatorConfig = {
+  box_top: number;
+  box_left: number;
+  box_width: number;
+  box_height: number;
+  max_characters: number;
+  available_fonts: string[];
+  default_font_color: string;
+};
+
+const DEFAULT_CONFIG: SimulatorConfig = {
   box_top: 35.5,
   box_left: 20.0,
   box_width: 60.0,
   box_height: 10.0,
   max_characters: 15,
   available_fonts: ["明朝体", "ゴシック体", "丸ゴシック"],
-  default_font_color: "#FFFFFF"
-}));
-location.reload();
+  default_font_color: "#FFFFFF",
+};
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  const gid = `gid://shopify/Product/${params.id}`;
+
+  const response = await admin.graphql(PRODUCTS_QUERY, {
+    variables: { first: 1 },
+  });
+  const data = await response.json();
+
+  const product = data.data.products.edges
+    .map((e: { node: { id: string; title: string; metafield: { value: string } | null } }) => e.node)
+    .find((p: { id: string }) => p.id === gid);
+
+  if (!product) throw new Response("Not Found", { status: 404 });
+
+  const config: SimulatorConfig = product.metafield
+    ? JSON.parse(product.metafield.value)
+    : DEFAULT_CONFIG;
+
+  return json({ product, config });
+}
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+
+  const config: SimulatorConfig = {
+    box_top: parseFloat(formData.get("box_top") as string),
+    box_left: parseFloat(formData.get("box_left") as string),
+    box_width: parseFloat(formData.get("box_width") as string),
+    box_height: parseFloat(formData.get("box_height") as string),
+    max_characters: parseInt(formData.get("max_characters") as string, 10),
+    available_fonts: (formData.get("available_fonts") as string)
+      .split(",")
+      .map((f) => f.trim())
+      .filter(Boolean),
+    default_font_color: formData.get("default_font_color") as string,
+  };
+
+  const gid = `gid://shopify/Product/${params.id}`;
+  const response = await admin.graphql(METAFIELDS_SET_MUTATION, {
+    variables: {
+      metafields: [
+        {
+          ownerId: gid,
+          namespace: "custom_simulator",
+          key: "config",
+          type: "json",
+          value: JSON.stringify(config),
+        },
+      ],
+    },
+  });
+  const result = await response.json();
+  const errors = result.data?.metafieldsSet?.userErrors ?? [];
+  if (errors.length > 0) {
+    return json({ errors });
+  }
+
+  return redirect("/app");
+}
+
+export default function ProductEdit() {
+  const { product, config } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+
+  return (
+    <Page
+      title={product.title}
+      backAction={{ content: "商品一覧", url: "/app" }}
+    >
+      <Layout>
+        <Layout.Section>
+          {actionData?.errors?.length > 0 && (
+            <Banner tone="critical" title="保存に失敗しました">
+              {actionData.errors.map((e: { message: string }, i: number) => (
+                <p key={i}>{e.message}</p>
+              ))}
+            </Banner>
+          )}
+          <Card>
+            <Form method="post">
+              <FormLayout>
+                <Text as="h2" variant="headingMd">テキスト配置設定（商品画像に対する%）</Text>
+                <FormLayout.Group>
+                  <TextField
+                    label="上からの位置 box_top (%)"
+                    name="box_top"
+                    type="number"
+                    defaultValue={String(config.box_top)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="左からの位置 box_left (%)"
+                    name="box_left"
+                    type="number"
+                    defaultValue={String(config.box_left)}
+                    autoComplete="off"
+                  />
+                </FormLayout.Group>
+                <FormLayout.Group>
+                  <TextField
+                    label="横幅 box_width (%)"
+                    name="box_width"
+                    type="number"
+                    defaultValue={String(config.box_width)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="高さ box_height (%)"
+                    name="box_height"
+                    type="number"
+                    defaultValue={String(config.box_height)}
+                    autoComplete="off"
+                  />
+                </FormLayout.Group>
+                <TextField
+                  label="最大文字数 max_characters"
+                  name="max_characters"
+                  type="number"
+                  defaultValue={String(config.max_characters)}
+                  autoComplete="off"
+                />
+                <TextField
+                  label="フォント一覧（カンマ区切り）available_fonts"
+                  name="available_fonts"
+                  defaultValue={config.available_fonts.join(", ")}
+                  helpText="例: 明朝体, ゴシック体, 丸ゴシック"
+                  autoComplete="off"
+                />
+                <TextField
+                  label="テキスト色 default_font_color（HEX）"
+                  name="default_font_color"
+                  defaultValue={config.default_font_color}
+                  helpText="例: #FFFFFF"
+                  autoComplete="off"
+                />
+                <Button submit variant="primary">保存する</Button>
+              </FormLayout>
+            </Form>
+          </Card>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
+}
 ```
 
-リロード後、以下を確認する：
-- テキスト入力欄に文字を打つと画像上のオーバーレイにリアルタイム反映される
-- フォントボタンを押すとオーバーレイのフォントが切り替わる
-- 文字数カウントが正しく動作する（最大15文字で入力不可になる）
-- sessionStorageを空にしてリロードすると、エラーメッセージが表示される（フォームが非表示になる）
+- [ ] **Step 2: TypeScript のコンパイルを確認する**
 
-- [ ] **Step 3: 「確定してカートに入れる」の動作を確認する**
+```bash
+npx tsc --noEmit
+```
 
-Shopify開発ストアで `parent_id` に実在するVariant IDを指定し、テキスト入力後にカートボタンを押す。
+Expected: エラーなし
+
+- [ ] **Step 3: `shopify app dev` で編集画面を確認する**
+
+商品一覧から商品をクリックし、編集画面が開くことを確認する。
 
 確認項目：
-- `/cart` ページに遷移する
-- カートにメイン商品と名入れ料金商品の2アイテムが入っている
-- メイン商品のLine Item Properties に「名入れテキスト」と「フォント」が表示されている
-- `sessionStorage` から `naire_config` が削除されている（開発者コンソールで確認）
+- 各フィールドに現在の値（またはデフォルト値）が入力済みになっている
+- 値を変更して「保存する」を押すと一覧ページへリダイレクトされる
+- 保存後、その商品のバッジが「設定済み」になっている
+- Shopify Admin の「商品 > メタフィールド」で `custom_simulator.config` に値が入っていることを確認する
 
 - [ ] **Step 4: コミットする**
 
 ```bash
-git add sections/main-product-personalize.liquid
-git commit -m "feat: implement simulator JS - preview, font select, cart add"
+git add app/routes/app.products.\$id.tsx
+git commit -m "feat: add product metafield edit page"
 ```
 
 ---
 
-## Task 4: メイン商品ページ用ボタンスニペット
+## テーマ側の設計メモ（`shop-moltensports-jp` リポジトリで実装）
 
-**Files:**
-- Create: `snippets/naire-button.liquid`
+> **このアプリは実装しない。** テーマ担当者向けの設計参照用。
 
-**Interfaces:**
-- Consumes: `product.metafields.custom_simulator.config`（メタフィールドのJSON値）
-- Produces:
-  - メタフィールドが存在する商品ページにのみ「名入れする」ボタンが表示される
-  - クリック時に `sessionStorage` に配置設定を保存し、`/products/name-printing-fee?view=personalize&parent_id=<variantId>` へ遷移する
+### 作成するファイル
 
-- [ ] **Step 1: スニペットを作成する**
+| ファイル | 役割 |
+|---|---|
+| `templates/product.personalize.json` | `?view=personalize` で使われる代替テンプレート |
+| `sections/main-product-personalize.liquid` | シミュレーター画面（HTML/CSS + JS）|
+| `snippets/naire-button.liquid` | 商品ページ用「名入れする」ボタン |
 
-```liquid
-{% if product.metafields.custom_simulator.config != blank %}
-  {%- assign naire_config = product.metafields.custom_simulator.config | json -%}
+### sessionStorage のキーと型
 
-  <button
-    type="button"
-    class="naire-trigger-btn"
-    id="js-naire-trigger-{{ product.id }}"
-    style="margin-top: 12px; padding: 12px 24px; background: #fff; border: 2px solid #000; cursor: pointer; font-size: 1rem; border-radius: 4px; width: 100%;"
-  >
-    名入れする
-  </button>
+```ts
+// キー名
+sessionStorage.setItem('naire_config', JSON.stringify(config));
 
-  <script>
-    (function () {
-      var btn = document.getElementById('js-naire-trigger-{{ product.id }}');
-      if (!btn) return;
-
-      btn.addEventListener('click', function () {
-        // 選択中のVariant IDを取得（標準テーマの hidden input[name="id"] から）
-        var variantInput = document.querySelector('input[name="id"], select[name="id"]');
-        var variantId = variantInput
-          ? variantInput.value
-          : '{{ product.selected_or_first_available_variant.id }}';
-
-        var config = {{ naire_config }};
-        sessionStorage.setItem('naire_config', JSON.stringify(config));
-
-        window.location.href =
-          '/products/name-printing-fee?view=personalize&parent_id=' + variantId;
-      });
-    })();
-  </script>
-{% endif %}
+// 型（custom_simulator.config メタフィールドの JSON と同一）
+type NaireConfig = {
+  box_top: number;       // 商品画像上からの位置 (%)
+  box_left: number;      // 商品画像左からの位置 (%)
+  box_width: number;     // 配置枠の横幅 (%)
+  box_height: number;    // 配置枠の高さ (%)
+  max_characters: number;
+  available_fonts: string[];
+  default_font_color: string; // HEX
+};
 ```
 
-- [ ] **Step 2: 既存のメイン商品セクションにスニペットを挿入する**
+### カート追加リクエスト（`/cart/add.js`）
 
-テーマの `sections/main-product.liquid`（または相当するファイル）内の「カートに入れる」ボタン直後に以下を追加する:
-
-```liquid
-{% render 'naire-button' %}
+```js
+{
+  items: [
+    {
+      id: Number(parentVariantId), // メイン商品のVariant ID（URLの?parent_id=から取得）
+      quantity: 1,
+      properties: {
+        '名入れテキスト': userInputText,
+        'フォント': selectedFont
+      }
+    },
+    {
+      id: feeVariantId, // 名入れ料金商品のVariant ID（Liquidから埋め込む）
+      quantity: 1
+    }
+  ]
+}
 ```
 
-※ファイル名と挿入箇所はテーマによって異なるため、実際のテーマ構造を確認してから実施すること。
+### 遷移URL形式
 
-- [ ] **Step 3: メイン商品ページで動作を確認する**
-
-`custom_simulator.config` メタフィールドを設定済みの商品ページを開き、以下を確認する：
-- 「名入れする」ボタンが表示されている
-- メタフィールドが未設定の商品ページではボタンが表示されない
-- バリアントを選択してから「名入れする」を押すと、正しいVariant IDがURLの `parent_id` に入る
-- 遷移後の名入れページで `sessionStorage` からデータが正常に読み込まれ、シミュレーターが起動する
-
-- [ ] **Step 4: コミットする**
-
-```bash
-git add snippets/naire-button.liquid
-git commit -m "feat: add naire-button snippet for main product page"
+```
+/products/name-printing-fee?view=personalize&parent_id=<VARIANT_ID>
 ```
 
 ---
@@ -576,25 +580,14 @@ git commit -m "feat: add naire-button snippet for main product page"
 ## Self-Review チェックリスト
 
 ### Spec Coverage
-- [x] 商品画像上にリアルタイムでテキストを重ねる → Task 3 の `updatePreview()`
-- [x] フォント選択 → Task 3 のフォントボタン生成
-- [x] `?view=personalize` 代替テンプレート → Task 1
-- [x] sessionStorage への配置設定保存 → Task 4 スニペット
-- [x] `parent_id` をURLクエリで渡す → Task 4 スニペット
-- [x] sessionStorage から配置設定を読み込む → Task 3 の初期化処理
-- [x] テキスト配置を% 座標で管理 → Task 2/3 でCSSのtop/left/width/heightを%で設定
-- [x] `/cart/add.js` で2アイテム同時追加 → Task 3 のカート追加処理
-- [x] Line Item Properties に名入れ内容を記録 → Task 3 の `properties` フィールド
-- [x] `max_characters` で入力文字数制限 → Task 3 の `textInput.maxLength`
-- [x] `available_fonts` をUIに反映 → Task 3 のフォントボタン生成
-- [x] `default_font_color` をオーバーレイに適用 → Task 3 の `overlay.style.color`
-- [x] メタフィールド未設定商品ではボタン非表示 → Task 4 の `{% if %}` 条件
+- [x] メタフィールド `custom_simulator.config` の登録・編集 → Task 3, 4
+- [x] 商品一覧で設定済み/未設定を確認できる → Task 3
+- [x] React Router v7 構成 → Task 1
+- [x] Shopify Admin GraphQL API でメタフィールド読み書き → Task 2, 4
+- [x] テーマ側の設計を参照用として記録 → テーマ側設計メモ
+- [x] Line Item Properties に名入れ内容を記録する仕様 → テーマ側設計メモ
 
-### Type/Name Consistency
-- `js-text-overlay`（Task 2 HTML）→ `document.getElementById('js-text-overlay')`（Task 3 JS）: 一致
-- `js-font-options`（Task 2 HTML）→ `document.getElementById('js-font-options')`（Task 3 JS）: 一致
-- `js-add-to-cart`（Task 2 HTML）→ `document.getElementById('js-add-to-cart')`（Task 3 JS）: 一致
-- `js-loading`（Task 2 HTML）→ `document.getElementById('js-loading')`（Task 3 JS）: 一致
-- `js-error`（Task 2 HTML）→ `document.getElementById('js-error')`（Task 3 JS）: 一致
-- `is-active`（Task 2 CSS）→ `classList.add('is-active')`（Task 3 JS）: 一致
-- `naire_config`（Task 4 sessionStorage key）→ `sessionStorage.getItem('naire_config')`（Task 3 JS）: 一致
+### Type Consistency
+- `PRODUCTS_QUERY`（Task 2）→ `import { PRODUCTS_QUERY }`（Task 3, 4）: 一致
+- `METAFIELDS_SET_MUTATION`（Task 2）→ `import { METAFIELDS_SET_MUTATION }`（Task 4）: 一致
+- `SimulatorConfig` 型（Task 4）→ `NaireConfig` 型（テーマ設計メモ）: フィールド名・型は完全一致

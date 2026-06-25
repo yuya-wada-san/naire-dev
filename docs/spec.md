@@ -49,10 +49,31 @@
 ---
 
 ## 3. Tech Stack & Files (技術スタックと作成ファイル)
-- **Environment**: Shopify Online Store 2.0 (自社ストア専用カスタム開発)
-- **Target Files**:
-  - `templates/product.personalize.json` (代替テンプレート定義)
-  - `sections/main-product-personalize.liquid` (名入れシミュレーター画面のメインロジック)
+
+### このリポジトリ（`naire-dev`）が担う範囲
+- **Framework**: Shopify App（React Router v7）
+- **役割**: 各商品の `custom_simulator.config` メタフィールドを管理するShopify Admin埋め込みUI
+- **App Configuration**: `shopify.app.toml`
+
+```
+naire-dev/
+├── app/
+│   ├── routes/
+│   │   ├── app._index.tsx       # 商品一覧（メタフィールド設定済み/未設定）
+│   │   └── app.products.$id.tsx # 商品ごとのメタフィールド編集画面
+│   └── shopify.server.ts
+├── docs/
+├── shopify.app.toml
+└── package.json
+```
+
+### テーマ側（別リポジトリ）が担う範囲
+- **リポジトリ**: `/Users/yuyawada/Home/Prestige/shop-moltensports-jp`
+- **役割**: ストアフロントのLiquidテンプレート・JS実装
+- **実装ファイル**（テーマ側で作成）:
+  - `templates/product.personalize.json` — 代替テンプレート定義
+  - `sections/main-product-personalize.liquid` — シミュレーター画面のメインロジック
+  - `snippets/naire-button.liquid` — 商品ページ用「名入れする」ボタン
 - **Frontend Logic**: Vanilla JS (純粋なJavaScript) + CSS (Absolute Positioning)
 - **Cart Integration**: Shopify Ajax API (`/cart/add.js`)
 
