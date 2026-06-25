@@ -69,14 +69,8 @@ naire-dev/
 
 ### テーマ側（別リポジトリ）が担う範囲
 - **リポジトリ**: `/Users/yuyawada/Home/Prestige/shop-moltensports-jp`
-- **役割**: ストアフロントのLiquidテンプレート・JS実装
-- **実装ファイル**（テーマ側で作成）:
-  - `templates/product.personalize.json` — 代替テンプレート定義
-  - `templates/product.metafield-config.liquid` — メタフィールドをJSONで返すAPIエンドポイント用テンプレート
-  - `sections/main-product-personalize.liquid` — シミュレーター画面のメインロジック
-  - `snippets/naire-button.liquid` — 商品ページ用「名入れする」ボタン
-- **Frontend Logic**: Vanilla JS (純粋なJavaScript) + CSS (Absolute Positioning)
-- **Cart Integration**: Shopify Ajax API (`/cart/add.js`)
+- テーマファイルは直接編集するため、このリポジトリでは管理しない
+- 名入れボタンの遷移URL形式のみ参照用として記載する（下記）
 
 ---
 
