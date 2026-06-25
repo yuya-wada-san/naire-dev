@@ -527,25 +527,75 @@ git commit -m "feat: add product metafield edit page"
 | ファイル | 役割 |
 |---|---|
 | `templates/product.personalize.json` | `?view=personalize` で使われる代替テンプレート |
+| `templates/product.metafield-config.liquid` | メタフィールドをJSONで返すAPIエンドポイント |
 | `sections/main-product-personalize.liquid` | シミュレーター画面（HTML/CSS + JS）|
 | `snippets/naire-button.liquid` | 商品ページ用「名入れする」ボタン |
 
-### sessionStorage のキーと型
+### メタフィールド取得エンドポイント
+
+`templates/product.metafield-config.liquid`:
+
+```liquid
+{%- layout none -%}
+{%- if product.metafields.custom_simulator.config != blank -%}
+{{ product.metafields.custom_simulator.config | json }}
+{%- else -%}
+null
+{%- endif -%}
+```
+
+アクセスURL: `/products/<parent_handle>?view=metafield-config`  
+レスポンス: `custom_simulator.config` の JSON がそのまま返る
+
+### 遷移URL形式
+
+```
+/products/name-printing-fee?view=personalize&parent_id=<VARIANT_ID>&parent_handle=<PRODUCT_HANDLE>
+```
+
+### 名入れページ側のデータ取得フロー（JS）
+
+```js
+const params = new URLSearchParams(window.location.search);
+const parentHandle = params.get('parent_handle');
+const parentVariantId = params.get('parent_id');
+
+// メタフィールドをフェッチ（sessionStorage 不要）
+const res = await fetch(`/products/${parentHandle}?view=metafield-config`);
+const config = await res.json(); // NaireConfig 型
+
+// config が null の場合はエラー表示
+```
+
+### NaireConfig 型
 
 ```ts
-// キー名
-sessionStorage.setItem('naire_config', JSON.stringify(config));
-
-// 型（custom_simulator.config メタフィールドの JSON と同一）
 type NaireConfig = {
-  box_top: number;       // 商品画像上からの位置 (%)
-  box_left: number;      // 商品画像左からの位置 (%)
-  box_width: number;     // 配置枠の横幅 (%)
-  box_height: number;    // 配置枠の高さ (%)
+  box_top: number;         // 商品画像上からの位置 (%)
+  box_left: number;        // 商品画像左からの位置 (%)
+  box_width: number;       // 配置枠の横幅 (%)
+  box_height: number;      // 配置枠の高さ (%)
   max_characters: number;
   available_fonts: string[];
   default_font_color: string; // HEX
 };
+```
+
+### naire-button.liquid の動作（sessionStorage 不要）
+
+```liquid
+<button type="button" id="js-naire-btn-{{ product.id }}">名入れする</button>
+<script>
+  document.getElementById('js-naire-btn-{{ product.id }}')
+    .addEventListener('click', function () {
+      var variantInput = document.querySelector('input[name="id"], select[name="id"]');
+      var variantId = variantInput ? variantInput.value : '{{ product.selected_or_first_available_variant.id }}';
+      window.location.href =
+        '/products/name-printing-fee?view=personalize'
+        + '&parent_id=' + variantId
+        + '&parent_handle={{ product.handle }}';
+    });
+</script>
 ```
 
 ### カート追加リクエスト（`/cart/add.js`）
@@ -554,7 +604,7 @@ type NaireConfig = {
 {
   items: [
     {
-      id: Number(parentVariantId), // メイン商品のVariant ID（URLの?parent_id=から取得）
+      id: Number(parentVariantId), // URLの ?parent_id= から取得
       quantity: 1,
       properties: {
         '名入れテキスト': userInputText,
@@ -562,18 +612,11 @@ type NaireConfig = {
       }
     },
     {
-      id: feeVariantId, // 名入れ料金商品のVariant ID（Liquidから埋め込む）
+      id: feeVariantId, // Liquidから埋め込む（名入れ料金商品のVariant ID）
       quantity: 1
     }
   ]
 }
-```
-
-### 遷移URL形式
-
-```
-/products/name-printing-fee?view=personalize&parent_id=<VARIANT_ID>
-```
 
 ---
 

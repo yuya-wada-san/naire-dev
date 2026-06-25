@@ -11,13 +11,13 @@
 
 1. **[メイン商品ページ（例: ボール商品）]**
    - ユーザーが「名入れする」ボタンをクリックする。
-   - JavaScriptが起動し、その商品の名入れ配置設定（メタフィールドに保存されたJSON）をブラウザの `sessionStorage` に一時保存する。
-   - 名入れ専用商品のURLへ遷移させる。その際、メイン商品のVariant IDをクエリとして付与し、さらに専用の代替テンプレートを指定する。
-     - 遷移先URL例: `/products/name-printing-fee?view=personalize&parent_id=XXXXX`
+   - JavaScriptが起動し、名入れ専用商品のURLへ遷移させる。その際、メイン商品の **Variant ID** と **商品ハンドル** の2つをクエリとして付与する。
+     - 遷移先URL例: `/products/name-printing-fee?view=personalize&parent_id=XXXXX&parent_handle=my-ball`
 
 2. **[名入れ専用ページ (`?view=personalize`)]**
    - Shopifyの代替テンプレート機能により、専用の画面（シミュレーター画面）がレンダリングされる。
-   - `sessionStorage` から配置設定のJSON（％座標）を読み込み、商品画像の上にテキスト入力枠（バウンディングボックス）を生成する。
+   - クエリパラメータから `parent_handle` を取得し、`/products/<parent_handle>?view=metafield-config` へフェッチしてメタフィールドのJSON設定を取得する。
+   - 取得した設定に基づき、商品画像の上にテキスト入力枠（バウンディングボックス）を生成する。
    - クエリパラメータから `parent_id` (メイン商品のVariant ID) を取得して保持する。
    - ユーザーがテキストを入力、またはフォントを選択すると、画像の上にリアルタイムに反映される。
 
@@ -72,6 +72,7 @@ naire-dev/
 - **役割**: ストアフロントのLiquidテンプレート・JS実装
 - **実装ファイル**（テーマ側で作成）:
   - `templates/product.personalize.json` — 代替テンプレート定義
+  - `templates/product.metafield-config.liquid` — メタフィールドをJSONで返すAPIエンドポイント用テンプレート
   - `sections/main-product-personalize.liquid` — シミュレーター画面のメインロジック
   - `snippets/naire-button.liquid` — 商品ページ用「名入れする」ボタン
 - **Frontend Logic**: Vanilla JS (純粋なJavaScript) + CSS (Absolute Positioning)
