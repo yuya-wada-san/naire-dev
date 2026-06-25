@@ -523,7 +523,7 @@ git commit -m "feat: add product metafield edit page"
 ### 名入れボタンの遷移URL形式
 
 ```
-/products/name-printing-fee?view=personalize&parent_id=<VARIANT_ID>&parent_handle=<PRODUCT_HANDLE>
+/products/name-printing-fee?view=naire&parent_id=<VARIANT_ID>&parent_handle=<PRODUCT_HANDLE>
 ```
 
 ---
