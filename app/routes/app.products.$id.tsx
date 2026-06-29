@@ -121,6 +121,7 @@ export default function ProductEdit() {
 
   const [previewText, setPreviewText] = useState("");
   const [fontSizePx, setFontSizePx] = useState(config.font_size);
+  const [fontColor, setFontColor] = useState(config.default_font_color);
   const shopify = useAppBridge();
 
   useEffect(() => {
@@ -135,30 +136,36 @@ export default function ProductEdit() {
   return (
     <s-page heading={product.title} back-url="/app">
 
-      <s-section heading="テキスト配置設定（画像上でドラッグして調整）">
+      <s-section heading="プレビュー確認">
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <BoundingBoxEditor
+            imageUrl={product.featuredImage?.url ?? ""}
+            box={box}
+            onChange={setBox}
+            previewText={previewText}
+            fontColor={fontColor}
+            fontSizePx={fontSizePx}
+          />
+          <label>
+            <s-text>プレビュー文字</s-text>
+            <input
+              type="text"
+              value={previewText}
+              onChange={(e) => setPreviewText(e.target.value)}
+              placeholder="例：田中太郎"
+              maxLength={config.max_characters}
+              style={inputStyle}
+            />
+            <span style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px", display: "block" }}>
+              ※ この文字はプレビュー用です。保存されません。
+            </span>
+          </label>
+        </div>
+      </s-section>
+
+      <s-section heading="名入れ設定">
         <Form method="post">
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <BoundingBoxEditor
-              imageUrl={product.featuredImage?.url ?? ""}
-              box={box}
-              onChange={setBox}
-              previewText={previewText}
-              fontColor={config.default_font_color}
-              fontSizePx={fontSizePx}
-            />
-
-            <label>
-              <s-text>プレビュー文字（保存されません）</s-text>
-              <input
-                type="text"
-                value={previewText}
-                onChange={(e) => setPreviewText(e.target.value)}
-                placeholder="例：田中太郎"
-                maxLength={config.max_characters}
-                style={inputStyle}
-              />
-            </label>
-
             <input type="hidden" name="box_top" value={box.top} />
             <input type="hidden" name="box_left" value={box.left} />
             <input type="hidden" name="box_width" value={box.width} />
@@ -208,7 +215,8 @@ export default function ProductEdit() {
               <input
                 name="default_font_color"
                 type="text"
-                defaultValue={config.default_font_color}
+                value={fontColor}
+                onChange={(e) => setFontColor(e.target.value)}
                 placeholder="#FFFFFF"
                 pattern="^#[0-9A-Fa-f]{6}$"
                 style={inputStyle}
